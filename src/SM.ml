@@ -24,7 +24,26 @@ type config = int list * Stmt.config
 
    Takes a configuration and a program, and returns a configuration as a result
  *)                         
-let eval _ = failwith "Not yet implemented"
+ let evaluateInstr stConfiguration instruction =
+  let (stack, configuration) = stConfiguration in
+  let (state, inputStream, outputStream) = configuration in
+  match instruction with
+    | BINOP operation -> (match stack with
+      | y::x::rest  -> [(Syntax.Expr.evaluateOperation operation) x y] @ rest , configuration
+      )
+    | CONST value -> [value] @ stack, configuration
+    | READ -> (match inputStream with 
+      | input::rest  -> [input] @ stack, (state, rest , outputStream)
+      )
+    | WRITE -> (match stack with 
+      | value::rest  -> rest , (state, inputStream, outputStream @ [value])
+      )
+    | LD variable -> ([state variable] @ stack, configuration)
+    | ST variable -> (match stack with 
+      | value::rest  -> (rest , (Syntax.Expr.update variable value state, inputStream, outputStream))
+      )
+
+let eval configuration program = List.fold_left evaluateInstr configuration program
 
 (* Top-level evaluation
 
@@ -41,4 +60,13 @@ let run p i = let (_, (_, _, o)) = eval ([], (Language.Expr.empty, i, [])) p in 
    Takes a program in the source language and returns an equivalent program for the
    stack machine
  *)
-let compile _ = failwith "Not yet implemented"
+let rec compileExpression expression = match expression with
+ | Syntax.Expr.Const value -> [CONST value]
+ | Syntax.Expr.Var variable -> [LD variable]
+ | Syntax.Expr.Binop (operator, left, right) -> (compileExpression left) @ (compileExpression right) @ [BINOP operator];;
+
+let rec compile statement = match statement with
+ | Syntax.Stmt.Read variable -> [READ; ST variable]
+ | Syntax.Stmt.Write expression -> (compileExpression expression) @ [WRITE]
+ | Syntax.Stmt.Assign (variable, expression) -> (compileExpression expression) @ [ST variable]
+ | Syntax.Stmt.Seq (first, second) -> (compile first) @ (compile second)
