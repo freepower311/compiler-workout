@@ -29,7 +29,7 @@ type config = int list * Stmt.config
   let (state, inputStream, outputStream) = configuration in
   match instruction with
     | BINOP operation -> (match stack with
-      | y::x::rest  -> [(Syntax.Expr.evaluateOperation operation) x y] @ rest , configuration
+      | y::x::rest  -> [(Language.Expr.evaluateOperation operation) x y] @ rest , configuration
       )
     | CONST value -> [value] @ stack, configuration
     | READ -> (match inputStream with 
@@ -40,7 +40,7 @@ type config = int list * Stmt.config
       )
     | LD variable -> ([state variable] @ stack, configuration)
     | ST variable -> (match stack with 
-      | value::rest  -> (rest , (Syntax.Expr.update variable value state, inputStream, outputStream))
+      | value::rest  -> (rest , (Language.Expr.update variable value state, inputStream, outputStream))
       )
 
 let eval configuration program = List.fold_left evaluateInstr configuration program
@@ -61,12 +61,12 @@ let run p i = let (_, (_, _, o)) = eval ([], (Language.Expr.empty, i, [])) p in 
    stack machine
  *)
 let rec compileExpression expression = match expression with
- | Syntax.Expr.Const value -> [CONST value]
- | Syntax.Expr.Var variable -> [LD variable]
- | Syntax.Expr.Binop (operator, left, right) -> (compileExpression left) @ (compileExpression right) @ [BINOP operator];;
+ | Language.Expr.Const value -> [CONST value]
+ | Language.Expr.Var variable -> [LD variable]
+ | Language.Expr.Binop (operator, left, right) -> (compileExpression left) @ (compileExpression right) @ [BINOP operator];;
 
 let rec compile statement = match statement with
- | Syntax.Stmt.Read variable -> [READ; ST variable]
- | Syntax.Stmt.Write expression -> (compileExpression expression) @ [WRITE]
- | Syntax.Stmt.Assign (variable, expression) -> (compileExpression expression) @ [ST variable]
- | Syntax.Stmt.Seq (first, second) -> (compile first) @ (compile second)
+ | Language.Stmt.Read variable -> [READ; ST variable]
+ | Language.Stmt.Write expression -> (compileExpression expression) @ [WRITE]
+ | Language.Stmt.Assign (variable, expression) -> (compileExpression expression) @ [ST variable]
+ | Language.Stmt.Seq (first, second) -> (compile first) @ (compile second)
