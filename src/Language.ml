@@ -116,7 +116,7 @@ module Stmt =
 
     (* The type of configuration: a state, an input stream, an output stream *)
     type config = Expr.state * int list * int list 
-Ы
+
     (* Statement evaluator
 
           val eval : config -> t -> config
