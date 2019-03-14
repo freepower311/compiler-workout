@@ -24,7 +24,26 @@ type config = int list * Stmt.config
 
    Takes a configuration and a program, and returns a configuration as a result
 *)                         
-let rec eval conf prog = failwith "Not yet implemented"
+let evaluateInstr stConfiguration instruction =
+  let (stack, configuration) = stConfiguration in
+  let (state, inputStream, outputStream) = configuration in
+  match instruction with
+    | BINOP operation -> (match stack with
+      | y::x::rest  -> [(Language.Expr.evaluateOperation operation) x y] @ rest , configuration
+      )
+    | CONST value -> [value] @ stack, configuration
+    | READ -> (match inputStream with 
+      | input::rest  -> [input] @ stack, (state, rest , outputStream)
+      )
+    | WRITE -> (match stack with 
+      | value::rest  -> rest , (state, inputStream, outputStream @ [value])
+      )
+    | LD variable -> ([state variable] @ stack, configuration)
+    | ST variable -> (match stack with 
+      | value::rest  -> (rest , (Language.Expr.update variable value state, inputStream, outputStream))
+      )
+
+let eval configuration program = List.fold_left evaluateInstr configuration program
 
 (* Top-level evaluation
 
