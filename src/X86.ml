@@ -80,7 +80,68 @@ open SM
    Take an environment, a stack machine program, and returns a pair --- the updated environment and the list
    of x86 instructions
 *)
-let compile _ _ = failwith "Not yet implemented"
+
+let clear reg = Binop ("^", reg, reg)
+
+
+let rec compile env scode = match scode with
+	| [] -> env, []
+	| instr :: scode' ->
+	  let env, asm =
+	    match instr with
+	    | CONST n ->
+	      let s, env = env#allocate in
+	      env, [Mov(L n, s)]
+	    | READ ->
+	      let s, env = env#allocate in
+	      env, [Call "Lread"; Mov (eax, s)]
+	    | WRITE ->
+	      let s, env = env#pop in
+	      env, [Push s; Call "Lwrite"; Pop eax]
+	    | LD x ->
+	      let s, env = (env#global x)#allocate in
+	      env, [Mov(M (env#loc x), s)]
+	    | ST x ->
+	      let s, env = (env#global x)#pop in
+	      env, [Mov(s, M (env#loc x))]
+	    | BINOP op -> 
+	      let rhs, lhs, env = env#pop2 in
+	      let cmp suff = env#push lhs, [clear eax;
+	                                    Binop ("cmp", rhs, lhs);
+	                                    Set(suff, "%al");
+	                                    Mov(eax, lhs)]
+	      in
+        let logical op = env#push lhs, [clear eax;
+                                        clear edx;
+	                                      Binop("cmp", L 0, lhs);
+	                                      Set("ne", "%al");
+	                                      Binop("cmp", L 0, rhs);
+	                                      Set("ne", "%dl");
+	                                      Binop(op, eax, edx);
+	                                      Mov(edx, lhs)]
+	      in
+	      match op with
+	      | "+" -> env#push lhs, [Binop ("+", rhs, lhs)]
+	      | "-" -> env#push lhs, [Binop ("-", rhs, lhs)]
+	      | "*" -> env#push lhs, [Binop ("*", rhs, lhs)]
+	      | "/" ->
+	        let s, env = env#allocate in
+	        env, [Mov (lhs, eax); Cltd; IDiv rhs; Mov(eax, s)]
+	      | "%" ->
+	        let s, env = env#allocate in
+	        env, [Mov (lhs, eax); Cltd; IDiv rhs; Mov(edx, s)]
+	      | "<" ->  cmp "l"
+	      | ">" ->  cmp "g"
+	      | "<=" -> cmp "le"
+	      | ">=" -> cmp "ge"
+	      | "==" -> cmp "e"
+	      | "!=" -> cmp "ne"
+	      | "&&" -> logical "&&"
+	      | "!!" -> logical "!!"
+	      | _ -> failwith (Printf.sprintf "Binary operator %s not yet supported" op)
+	  in
+	  let env, asm' = compile env scode' in
+	  env, asm @ asm'
 
 (* A set of strings *)           
 module S = Set.Make (String)
