@@ -28,7 +28,35 @@ type config = int list * Stmt.config
    Takes an environment, a configuration and a program, and returns a configuration as a result. The
    environment is used to locate a label to jump to (via method env#labeled <label_name>)
 *)                         
-let rec eval env conf prog = failwith "Not yet implemented"
+
+
+let rec eval env (stack, (state, inputStream, outputStream)) = function
+	| [] -> stack, (state, inputStream, outputStream)    
+	| instruction :: tail -> 
+		match instruction with
+		| BINOP operation -> 
+			(match stack with 
+          | y :: x :: rest -> eval env ((Expr.evaluateOperation operation x y) :: rest, (state, inputStream,outputStream))
+          | _ -> failwith "Stack does not have enough elements") tail
+		| CONST value -> eval env (value :: stack, (state, inputStream, outputStream)) tail
+    | READ -> 
+      let num = List.hd inputStream in 
+      eval env (num :: stack, (state, List.tl inputStream, outputStream)) tail
+    | WRITE -> 
+      let num = List.hd stack in 
+      eval env (List.tl stack, (state, inputStream, outputStream @ [num])) tail
+		| LD x -> eval env ((state x) :: stack, (state, inputStream, outputStream)) tail
+		| ST x -> let num = List.hd stack in eval env (List.tl stack, (Expr.update x num state, inputStream, outputStream)) tail
+		| LABEL _ -> eval env (stack, (state, inputStream, outputStream)) tail
+		| JMP label -> eval env (stack, (state, inputStream, outputStream)) (env#labeled label)
+		| CJMP (condition, label) -> 
+		  let value::stack' = stack in
+		  let x = match condition with
+		  | "nz" -> value <> 0
+      | "z" -> value = 0 
+      | _ -> failwith "CJMP error"
+      in
+        eval env (stack', (state, inputStream, outputStream)) (if (x) then (env#labeled label) else tail)
 
 (* Top-level evaluation
 
@@ -52,5 +80,39 @@ let run p i =
 
    Takes a program in the source language and returns an equivalent program for the
    stack machine
-*)
-let compile p = failwith "Not yet implemented"
+
+let compile p = failwith "Not yet implemented"*)
+
+let env = object
+    val mutable label_count = 0
+    method gen_label = label_count <- (label_count + 1); "L" ^ string_of_int label_count
+end 
+
+let rec compile =
+	let rec compileExpr = function
+	| Expr.Const value -> [CONST value]
+	| Expr.Var variable -> [LD variable]
+	| Expr.Binop (oper, left, right) -> (compileExpr left) @ (compileExpr right) @ [BINOP oper]
+	in
+	function
+	| Stmt.Assign (variable, expr) -> (compileExpr expr) @ [ST variable]
+  | Stmt.Read variable ->  [READ; ST variable]
+  | Stmt.Write expr -> (compileExpr expr) @ [WRITE]
+  | Stmt.Seq (left, right) -> (compile left) @ (compile right)
+	| Stmt.Skip -> []
+	| Stmt.If (expr, left, right) -> 
+    let l_else = env#gen_label in
+    let l_end = env#gen_label in
+    let curr = compile left in
+    let last = compile right in
+    (compileExpr expr @ [CJMP ("z", l_else)] @ curr @ [JMP l_end] @ [LABEL l_else] @ last @ [LABEL l_end])
+	| Stmt.While (expr, statement) ->
+    let l_end = env#gen_label in
+    let l_loop = env#gen_label in
+    let body = compile statement in
+    ([JMP l_end] @ [LABEL l_loop] @ body @ [LABEL l_end] @ compileExpr expr @ [CJMP ("nz", l_loop)])
+	| Stmt.Repeat (expr, statement) ->
+    let l_loop = env#gen_label in
+    let body = compile statement in 
+    ([LABEL l_loop] @ body @ compileExpr expr @ [CJMP ("z", l_loop)]) 
+  
