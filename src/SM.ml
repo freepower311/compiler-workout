@@ -88,31 +88,49 @@ let env = object
     method gen_label = label_count <- (label_count + 1); "L" ^ string_of_int label_count
 end 
 
-let rec compile =
+let rec compileWithLabels program lastLabel =
 	let rec compileExpr = function
 	| Expr.Const value -> [CONST value]
 	| Expr.Var variable -> [LD variable]
 	| Expr.Binop (oper, left, right) -> (compileExpr left) @ (compileExpr right) @ [BINOP oper]
 	in
-	function
-	| Stmt.Assign (variable, expr) -> (compileExpr expr) @ [ST variable]
-  | Stmt.Read variable ->  [READ; ST variable]
-  | Stmt.Write expr -> (compileExpr expr) @ [WRITE]
-  | Stmt.Seq (left, right) -> (compile left) @ (compile right)
-	| Stmt.Skip -> []
+	match program with
+	| Stmt.Assign (variable, expr) -> (compileExpr expr) @ [ST variable], false
+  | Stmt.Read variable ->  [READ; ST variable], false
+  | Stmt.Write expr -> (compileExpr expr) @ [WRITE], false
+  | Stmt.Seq (left, right) -> 
+    (let newLabel = env#gen_label in
+    let (compiledL, lUsedL) = compileWithLabels left newLabel in
+    let (compiledR, lUsedR) = compileWithLabels right lastLabel in
+    (compiledL @ (if lUsedL then [LABEL newLabel] else []) @ compiledR), lUsedR) 
+	| Stmt.Skip -> [], false
 	| Stmt.If (expr, left, right) -> 
     let l_else = env#gen_label in
-    let l_end = env#gen_label in
-    let curr = compile left in
-    let last = compile right in
-    (compileExpr expr @ [CJMP ("z", l_else)] @ curr @ [JMP l_end] @ [LABEL l_else] @ last @ [LABEL l_end])
+    let (compiledL, lUsedL) = compileWithLabels left lastLabel in
+    let (compiledR, lUsedR) = compileWithLabels right lastLabel in
+    (compileExpr expr @ 
+    [CJMP ("z", l_else)] @ 
+    compiledL @ 
+    (if lUsedL then [] else [JMP lastLabel]) @ 
+    [LABEL l_else] @ 
+    compiledR @ 
+    (if lUsedR then [] else [JMP lastLabel])), true
 	| Stmt.While (expr, statement) ->
     let l_end = env#gen_label in
     let l_loop = env#gen_label in
-    let body = compile statement in
-    ([JMP l_end] @ [LABEL l_loop] @ body @ [LABEL l_end] @ compileExpr expr @ [CJMP ("nz", l_loop)])
+    let (body, _) = compileWithLabels statement l_end in
+    ([JMP l_end] @ 
+    [LABEL l_loop] @ 
+    body @ 
+    [LABEL l_end] @ 
+    compileExpr expr @ 
+    [CJMP ("nz", l_loop)]), false
 	| Stmt.Repeat (expr, statement) ->
     let l_loop = env#gen_label in
-    let body = compile statement in 
-    ([LABEL l_loop] @ body @ compileExpr expr @ [CJMP ("z", l_loop)]) 
+    let (body, _) = compileWithLabels statement lastLabel in 
+    ([LABEL l_loop] @ body @ compileExpr expr @ [CJMP ("z", l_loop)]), false
   
+let rec compile p =
+  let label = env#gen_label in
+  let compiled, used = compileWithLabels p label in
+  compiled @ (if used then [LABEL label] else [])
