@@ -86,7 +86,81 @@ open SM
    Take an environment, a stack machine program, and returns a pair --- the updated environment and the list
    of x86 instructions
 *)
-let compile _ = failwith "Not Implemented Yet"
+let clear reg = Binop ("^", reg, reg)
+
+let rec compile env scode = match scode with
+  | [] -> env, []
+  | instr :: scode' ->
+    let env, asm =
+    match instr with
+    | CONST n ->
+      let s, env = env#allocate in
+      env, [Mov (L n, s)]  
+    | READ ->
+      let x, env = env#allocate in
+      env, [Call "Lread";
+            Mov (eax, x)]
+    | WRITE ->
+      let x, env = env#pop in
+      env, [Push x;
+            Call "Lwrite";
+            Pop eax]
+    | LD x ->
+      let s, env = (env#global x)#allocate in
+      env, (match s with 
+            | S _ -> [Mov (M (env#loc x), eax); Mov (eax, s)] 
+            | _   -> [Mov (M (env#loc x), s)])
+    | ST x ->
+      let s, env = (env#global x)#pop in
+      env, (match s with
+            | S _ -> [Mov (s, eax); Mov (eax, M (env#loc x))]
+            | _   -> [Mov (s, M (env#loc x))])
+    | LABEL labl -> env, [Label labl]
+    | JMP labl -> env, [Jmp labl]
+    | CJMP (a, labl) -> 
+      let o, env = env#pop in
+      env, [Binop ("cmp", L 0, o); CJmp (a, labl)]
+    | BINOP operator ->
+      let rhs, lhs, env = env#pop2 in
+      let res, env = env#allocate in
+      env, match operator with
+      | "+" | "-" | "*" -> 
+        [Mov (lhs, eax);
+        Binop (operator, rhs, eax);
+        Mov (eax, lhs)]
+      | "/" -> 
+        [Mov (lhs, eax);
+        Cltd; IDiv rhs;
+        Mov (eax, res)]
+      | "%" -> 
+        [Mov (lhs, eax);
+        Cltd; IDiv rhs;
+        Mov (edx, res)]
+      | "&&" | "!!" -> 
+        [clear eax;
+        clear edx;
+        Binop ("cmp", L 0, lhs);
+        Set ("nz", "%al");
+        Binop ("cmp", L 0, rhs);
+        Set ("nz", "%dl");
+        Binop (operator, eax, edx);
+        Mov (edx, res)]
+      | ">"  | ">=" | "<"  | "<=" | "==" | "!=" -> 
+        [Mov (lhs, eax);
+        Binop ("cmp", rhs, eax);
+        Mov (eax, lhs); 
+        Mov (L 0, eax);
+        (match operator with
+        | ">"  -> Set ("g",  "%al")
+        | ">=" -> Set ("ge", "%al")
+        | "<"  -> Set ("l", "%al")
+        | "<=" -> Set ("le", "%al")
+        | "==" -> Set ("e",  "%al")
+        | "!=" -> Set ("ne", "%al"));
+        Mov (eax, res)]
+      in 
+      let env, asm' = compile env scode' in
+      (env, asm @ asm')
 
 (* A set of strings *)           
 module S = Set.Make (String)
@@ -104,14 +178,14 @@ class env =
     (* allocates a fresh position on a symbolic stack *)
     method allocate =    
       let x, n =
-	let rec allocate' = function
-	| []                            -> ebx     , 0
-	| (S n)::_                      -> S (n+1) , n+1
-	| (R n)::_ when n < num_of_regs -> R (n+1) , stack_slots
+  let rec allocate' = function
+  | []                            -> ebx     , 0
+  | (S n)::_                      -> S (n+1) , n+1
+  | (R n)::_ when n < num_of_regs -> R (n+1) , stack_slots
         | (M _)::s                      -> allocate' s
-	| _                             -> S 0     , 1
-	in
-	allocate' stack
+  | _                             -> S 0     , 1
+  in
+  allocate' stack
       in
       x, {< stack_slots = max n stack_slots; stack = x::stack >}
 

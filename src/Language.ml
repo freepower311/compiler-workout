@@ -97,20 +97,20 @@ module Expr =
     *)
     ostap (                                      
       parse:
-	  !(Ostap.Util.expr 
+          !(Ostap.Util.expr 
              (fun x -> x)
-	     (Array.map (fun (a, s) -> a, 
+              (Array.map (fun (a, s) -> a, 
                            List.map  (fun s -> ostap(- $(s)), (fun x y -> Binop (s, x, y))) s
                         ) 
               [|                
-		`Lefta, ["!!"];
-		`Lefta, ["&&"];
-		`Nona , ["=="; "!="; "<="; "<"; ">="; ">"];
-		`Lefta, ["+" ; "-"];
-		`Lefta, ["*" ; "/"; "%"];
+                `Lefta, ["!!"];
+                `Lefta, ["&&"];
+                `Nona , ["=="; "!="; "<="; "<"; ">="; ">"];
+                `Lefta, ["+" ; "-"];
+                `Lefta, ["*" ; "/"; "%"];
               |] 
-	     )
-	     primary);
+              )
+              primary);
       
       primary:
         n:DECIMAL {Const n}
@@ -150,13 +150,47 @@ module Stmt =
 
        which returns a list of formal parameters and a body for given definition
     *)
-    let rec eval _ = failwith "Not Implemented Yet"
-                                
+    let rec eval env configuration statement = 
+      let (state, inputStream, outputStream) = configuration in
+      match statement with
+        | Read variable -> (match inputStream with 
+          | value::rest -> (State.update variable value state), rest, outputStream
+          | _ -> failwith "Input is empty")
+        | Write expression -> (state, inputStream, outputStream @ [Expr.eval state expression])
+        | Assign (variable, expression) -> (State.update variable (Expr.eval state expression) state), inputStream, outputStream
+        | Seq (first, second) -> eval env (eval env configuration first) second
+        | Skip -> configuration
+        | If (expression, left, right) -> if (Expr.eval state expression) != 0 then eval env (state, inputStream, outputStream) left else eval env configuration right
+        | While (expression, stmt) -> if (Expr.eval state expression) != 0 then eval env (eval env configuration stmt) statement else configuration
+        | Repeat (stmt, expression) -> let (state', inputStream', outputStream') = eval env configuration stmt in 
+          if Expr.eval state' expression == 0 then eval env (state', inputStream', outputStream') statement  else (state', inputStream', outputStream')
+        | Call (name, expr) ->
+          let (arg, locals, body) = env#definition name in
+          let expr = List.combine arg (List.map (Expr.eval state) expr) in
+          let state' = State.push_scope state (arg @ locals) in
+          let fun_env_w_args = List.fold_left (fun state (name, value) -> State.update name value state) state' expr in
+          let (new_s, inputStream, outputStream) = eval env (fun_env_w_args,inputStream, outputStream) body in
+          (State.drop_scope new_s state, inputStream, outputStream)
+
     (* Statement parser *)
     ostap (                                      
-      parse: empty {failwith "Not yet implemented"}
+      stmnt:
+      x:IDENT ":=" e:!(Expr.parse)    {Assign (x, e)}
+      | "read" "(" x:IDENT ")"         {Read x}
+      | "write" "(" e:!(Expr.parse) ")" {Write e}
+      | "skip" {Skip}
+      | "if" expr:!(Expr.parse) "then" s:parse "fi" {If (expr, s, Skip)}
+      | "if" expr:!(Expr.parse) "then" l:parse r:else_or_elif "fi" {If (expr, l, r)}
+      | "while" expr:!(Expr.parse) "do" s:parse "od" {While (expr, s)}
+      | "for" condition:parse "," expr:!(Expr.parse) "," l:parse "do" r:parse "od" {Seq (condition, While (expr, Seq (r, l)))}
+      | "repeat" s:parse "until" expr:!(Expr.parse) {Repeat (s, expr)}
+      | name:IDENT "(" args:(!(Expr.parse))* ")" {Call (name, args)};
+      else_or_elif: 
+        "else" s:parse {s}
+      | "elif" expr:!(Expr.parse) "then" l:parse r:else_or_elif {If (expr, l, r)};
+      parse: l:stmnt ";" rest:parse {Seq (l, rest)} | stmnt
     )
-      
+
   end
 
 (* Function and procedure definitions *)
@@ -167,7 +201,16 @@ module Definition =
     type t = string * (string list * string list * Stmt.t)
 
     ostap (                                      
-      parse: empty {failwith "Not yet implemented"}
+      parse: 
+          "fun" fun_name:IDENT "(" args: (IDENT)* ")"
+          locals: (%"local" (IDENT)*)?
+          "{" body: !(Stmt.parse) "}" 
+          { 
+            let locals = match locals with
+            | Some x -> x
+            | _ -> [] in
+            fun_name, (args, locals, body)
+          }
     )
 
   end
