@@ -203,9 +203,12 @@ let rec compile env scode = match scode with
                                 
 (* A set of strings *)           
 module S = Set.Make (String)
-
+let rec list_init iter n f =
+  if iter < n
+  then (f iter) :: (list_init (iter + 1) n f)
+  else []
 (* Environment implementation *)
-let make_assoc l = List.combine l (List.init (List.length l) (fun x -> x))
+let make_assoc l = List.combine l (list_init 0 (List.length l) (fun x -> x))
                      
 class env =
   object (self)
